@@ -1,0 +1,7 @@
+{"time": "2026-10-28T08:57:24.109710+00:00", "request_id": "1", "message": "Received loan eligibility request"}
+{"time": "2026-10-28T08:57:24.117744+00:00", "request_id": "1", "message": "Hard knockout: fail"}
+{"time": "2026-10-28T08:57:24.121050+00:00", "request_id": "1", "message": "Financial profile and user-stated score recorded; no bureau pull performed"}
+{"time": "2026-10-28T08:57:24.123604+00:00", "request_id": "1", "message": "Synthetic KYC/bureau checks: synthetic_profile_only"}
+{"time": "2026-10-28T08:57:24.128318+00:00", "request_id": "1", "message": "Eligibility engine completed with deterministic demo rules"}
+{"time": "2026-10-28T08:57:24.131107+00:00", "request_id": "1", "message": "Policy evidence retrieved"}
+{"time": "2026-10-28T08:57:24.136678+00:00", "request_id": "1", "message": "Result report generated with deterministic_fallback"}
