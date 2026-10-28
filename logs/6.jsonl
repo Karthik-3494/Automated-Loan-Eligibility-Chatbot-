@@ -1,0 +1,7 @@
+{"time": "2026-10-28T10:16:53.380021+00:00", "request_id": "6", "message": "Received loan eligibility request"}
+{"time": "2026-10-28T10:16:53.382816+00:00", "request_id": "6", "message": "Hard knockout: pass"}
+{"time": "2026-10-28T10:16:53.384975+00:00", "request_id": "6", "message": "Financial profile and user-stated score recorded; no bureau pull performed"}
+{"time": "2026-10-28T10:16:53.387348+00:00", "request_id": "6", "message": "Applicant profile checks: profile_reviewed"}
+{"time": "2026-10-28T10:16:53.391053+00:00", "request_id": "6", "message": "Eligibility engine completed with deterministic eligibility rules"}
+{"time": "2026-10-28T10:16:53.394441+00:00", "request_id": "6", "message": "Policy evidence retrieved"}
+{"time": "2026-10-28T10:16:53.396574+00:00", "request_id": "6", "message": "Result report generated with deterministic_fallback"}

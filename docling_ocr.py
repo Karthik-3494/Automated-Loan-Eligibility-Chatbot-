@@ -48,18 +48,18 @@ def qwen_document_fallback(path):
                 {
                     "role": "user",
                     "content": (
-                        "Identify the visible document types. Return only comma-separated labels "
-                        "from this list: identity/address proof, income proof, bank statement, "
-                        "collateral/asset document. Do not transcribe names, account numbers, "
-                        "addresses, or other personal information. Do not claim that a document "
-                        "is authentic, valid, verified, or sufficient for a loan."
+                        "Look at the image and list the document types you can see. "
+                        "Use only these labels when they apply: Identity & Address Proof, "
+                        "Income Proof, Bank Statement, Collateral/Asset Document. "
+                        "Return the labels only, separated by commas. Do not transcribe "
+                        "personal details or judge authenticity."
                     ),
                     "images": [encoded_image],
                 }
             ],
             options={"temperature": 0, "num_predict": 100, "num_ctx": 8192},
         )
-        answer = response.message.content.casefold()
+        answer = (response.message.content or "").casefold()
         categories = []
         if "identity" in answer and "address" in answer:
             categories.append("identity/address proof")

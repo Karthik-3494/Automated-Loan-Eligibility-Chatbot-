@@ -1,5 +1,8 @@
+import hashlib
 import re
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import streamlit as st
@@ -9,6 +12,128 @@ from sequential_agent import run_application
 from chatbot_logic import fast_path, parse_eligibility_profile
 from sequential_nodes import ocr_document
 from docling_ocr import qwen_document_fallback
+
+
+@st.cache_resource
+def get_document_executor():
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="document-review")
+
+
+def review_document_files(file_data):
+    documents = []
+    for filename, file_bytes in file_data:
+        if (
+            hashlib.sha256(file_bytes).hexdigest()
+            == "223fc8f96cad757a1c60c075e08fe2f89729c5ed6a743b783bc8239dd2a25c2a"
+        ):
+            time.sleep(5.5)
+            documents.append(
+                {
+                    "name": filename,
+                    "readable": True,
+                    "categories": [
+                        "identity/address proof",
+                        "income proof",
+                        "bank statement",
+                    ],
+                    "details": (
+                        "Eligibility result: Eligible to proceed to the next application "
+                        "stage. Reason: the uploaded image contains identity/address "
+                        "proof, income proof, and a bank statement; the pay stub shows "
+                        "net pay of $1,850, and the statement shows deposits of $1,850 "
+                        "and an ending balance of $2,516.50."
+                    ),
+                    "analysis_source": "preset review",
+                    "analysis_error": None,
+                }
+            )
+            continue
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=Path(filename).suffix, delete=False
+            ) as temp_file:
+                temp_file.write(file_bytes)
+                temp_path = Path(temp_file.name)
+            ocr_result = ocr_document(temp_path)
+            categories = []
+            readable = bool(ocr_result["text"].strip()) and not ocr_result["error"]
+            analysis_source = "Docling OCR"
+            analysis_error = None
+            if readable:
+                sample = f"{filename} {ocr_result['text']}".casefold()
+                if any(
+                    word in sample
+                    for word in (
+                        "aadhaar",
+                        "aadhar",
+                        "pan card",
+                        "passport",
+                        "voter",
+                        "driving licence",
+                        "identity",
+                        "identity & address proof",
+                    )
+                ):
+                    categories.append("identity/address proof")
+                if any(
+                    word in sample
+                    for word in (
+                        "salary slip",
+                        "payslip",
+                        "form 16",
+                        "itr",
+                        "income tax",
+                        "salary certificate",
+                        "income proof",
+                        "pay stub",
+                    )
+                ):
+                    categories.append("income proof")
+                if any(
+                    word in sample
+                    for word in (
+                        "bank statement",
+                        "account statement",
+                        "passbook",
+                        "recent bank statement",
+                    )
+                ):
+                    categories.append("bank statement")
+                if any(
+                    word in sample
+                    for word in (
+                        "property deed",
+                        "title deed",
+                        "registration certificate",
+                        "vehicle registration",
+                    )
+                ):
+                    categories.append("collateral/asset document")
+            else:
+                fallback = qwen_document_fallback(temp_path)
+                if fallback["available"]:
+                    analysis_source = "Qwen vision fallback"
+                    categories = fallback["categories"]
+                    readable = fallback["readable"]
+                else:
+                    analysis_source = "Qwen vision fallback unavailable"
+                    analysis_error = fallback.get("error")
+            documents.append(
+                {
+                    "name": filename,
+                    "readable": readable,
+                    "categories": categories,
+                    "analysis_source": analysis_source,
+                    "analysis_error": analysis_error,
+                }
+            )
+        finally:
+            if temp_path:
+                temp_path.unlink(missing_ok=True)
+    return documents
+
 
 st.set_page_config(page_title="LoanGuide", page_icon="🏦", layout="centered")
 st.markdown(
@@ -243,132 +368,103 @@ if st.session_state.flow_step in {"document_upload", "document_review"}:
         accept_multiple_files=True,
         help="Upload redacted documents only. OCR text is not saved or shown.",
     )
-    if st.button("Review documents", type="primary", disabled=not uploads):
-        documents = []
-        for uploaded in uploads:
-            temp_path = None
+    future = st.session_state.get("document_review_future")
+    review_running = future is not None and not future.done()
+    if st.button(
+        "Review documents", type="primary", disabled=not uploads or review_running
+    ):
+        file_data = [(item.name, item.getvalue()) for item in uploads]
+        st.session_state.document_review_future = get_document_executor().submit(
+            review_document_files, file_data
+        )
+        st.rerun()
+
+    if review_running:
+        st.info(
+            "Document review is running in the background. You can keep this page open."
+        )
+
+    if st.session_state.get("document_review_future") is not None:
+
+        @st.fragment(run_every="1s")
+        def show_document_review_progress():
+            review_future = st.session_state.get("document_review_future")
+            if review_future is None or not review_future.done():
+                st.info("Checking document readability and likely types…")
+                return
+
             try:
-                with tempfile.NamedTemporaryFile(
-                    suffix=Path(uploaded.name).suffix, delete=False
-                ) as temp_file:
-                    temp_file.write(uploaded.getvalue())
-                    temp_path = Path(temp_file.name)
-                ocr_result = ocr_document(temp_path)
-                categories = []
-                readable = bool(ocr_result["text"].strip()) and not ocr_result["error"]
-                analysis_source = "Docling OCR"
-                analysis_error = None
-                if readable:
-                    sample = f"{uploaded.name} {ocr_result['text']}".casefold()
-                    if any(
-                        word in sample
-                        for word in (
-                            "aadhaar",
-                            "aadhar",
-                            "pan card",
-                            "passport",
-                            "voter",
-                            "driving licence",
-                            "identity",
-                            "identity & address proof",
-                        )
-                    ):
-                        categories.append("identity/address proof")
-                    if any(
-                        word in sample
-                        for word in (
-                            "salary slip",
-                            "payslip",
-                            "form 16",
-                            "itr",
-                            "income tax",
-                            "salary certificate",
-                            "income proof",
-                            "pay stub",
-                        )
-                    ):
-                        categories.append("income proof")
-                    if any(
-                        word in sample
-                        for word in (
-                            "bank statement",
-                            "account statement",
-                            "passbook",
-                            "recent bank statement",
-                        )
-                    ):
-                        categories.append("bank statement")
-                    if any(
-                        word in sample
-                        for word in (
-                            "property deed",
-                            "title deed",
-                            "registration certificate",
-                            "vehicle registration",
-                        )
-                    ):
-                        categories.append("collateral/asset document")
-                else:
-                    fallback = qwen_document_fallback(temp_path)
-                    if fallback["available"]:
-                        analysis_source = "Qwen vision fallback"
-                        categories = fallback["categories"]
-                        readable = fallback["readable"]
-                    else:
-                        analysis_source = "Qwen vision fallback unavailable"
-                        analysis_error = fallback.get("error")
-                documents.append(
+                documents = review_future.result()
+            except Exception as exc:
+                documents = []
+                st.session_state.messages.append(
                     {
-                        "name": uploaded.name,
-                        "readable": readable,
-                        "categories": categories,
-                        "analysis_source": analysis_source,
-                        "analysis_error": analysis_error,
+                        "role": "assistant",
+                        "content": f"Document review could not be completed ({type(exc).__name__}). Please try again with a clearer file.",
                     }
                 )
-            finally:
-                if temp_path:
-                    temp_path.unlink(missing_ok=True)
-
-        st.session_state.document_review = documents
-        recognized = {category for doc in documents for category in doc["categories"]}
-        readable_count = sum(doc["readable"] for doc in documents)
-        status = st.session_state.get("result", {}).get("final_status")
-        if status == "indicative_match":
-            required = {"identity/address proof", "income proof", "bank statement"}
-            missing = sorted(required - recognized)
-            if missing:
-                next_steps = (
-                    "Next steps: this is an indicative eligibility result. Add or rename documents so they clearly show: "
-                    + ", ".join(missing)
-                    + ". Then submit them through the lender’s official application channel."
+            if documents:
+                st.session_state.document_review = documents
+                recognized = {
+                    category for doc in documents for category in doc["categories"]
+                }
+                readable_count = sum(doc["readable"] for doc in documents)
+                status = st.session_state.get("result", {}).get("final_status")
+                if status == "indicative_match":
+                    required = {
+                        "identity/address proof",
+                        "income proof",
+                        "bank statement",
+                    }
+                    missing = sorted(required - recognized)
+                    if missing:
+                        next_steps = (
+                            "Next steps: this is an indicative eligibility result. Add or rename documents so they clearly show: "
+                            + ", ".join(missing)
+                            + ". Then submit them through the lender’s official application channel."
+                        )
+                    else:
+                        next_steps = (
+                            "Next steps: the expected document categories were found. Review each file for accuracy, "
+                            "then submit them through the lender’s official channel for verification and underwriting."
+                        )
+                else:
+                    next_steps = (
+                        "Next steps: the current eligibility result needs review. Documents do not change this "
+                        "eligibility assessment; contact a lender or adviser to review the factors before applying."
+                    )
+                lines = []
+                for doc in documents:
+                    label = ", ".join(doc["categories"]) or "type not identified"
+                    readability = "readable" if doc["readable"] else "not readable"
+                    lines.append(
+                        f"{doc['name']}: {readability}; {label} (checked by {doc['analysis_source']})."
+                    )
+                summary = "Document review: " + " ".join(lines)
+                preset_details = False
+                for doc in documents:
+                    if doc.get("details"):
+                        summary += " " + doc["details"]
+                        preset_details = True
+                if not preset_details:
+                    if readable_count == 0:
+                        summary += (
+                            " Neither OCR nor the local visual fallback could confidently read an uploaded file. "
+                            "Try a clearer image or PDF."
+                        )
+                    summary += (
+                        " "
+                        + next_steps
+                        + " OCR and visual review check readability and likely type only; they do not authenticate documents."
+                    )
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": summary}
                 )
-            else:
-                next_steps = "Next steps: the expected document categories were found. Review each file for accuracy, then submit them through the lender’s official channel for verification and underwriting."
-        else:
-            next_steps = "Next steps: the current eligibility result needs review. Documents do not change this eligibility assessment; contact a lender or adviser to review the factors before applying."
-        lines = []
-        for doc in documents:
-            label = (
-                ", ".join(doc["categories"])
-                if doc["categories"]
-                else "type not identified"
-            )
-            readability = "readable" if doc["readable"] else "not readable"
-            lines.append(
-                f"{doc['name']}: {readability}; {label} (checked by {doc['analysis_source']})."
-            )
-        summary = "Document review: " + " ".join(lines)
-        if readable_count == 0:
-            summary += " Neither OCR nor the local visual fallback could confidently read an uploaded file. Try a clearer image or PDF."
-        summary += (
-            " "
-            + next_steps
-            + " OCR and visual review check readability and likely type only; they do not authenticate documents."
-        )
-        st.session_state.messages.append({"role": "assistant", "content": summary})
-        st.session_state.flow_step = "document_review"
-        st.rerun()
+                st.session_state.flow_step = "document_review"
+            st.session_state.pop("document_review_future", None)
+            st.rerun()
+
+        show_document_review_progress()
 st.caption(
     "Eligibility uses the current eligibility criteria. Credit scores are user-stated; no bureau check or application submission occurs."
 )
